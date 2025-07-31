@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Knowledge Base</title>
+<style>
+body { font-family: Arial, sans-serif; margin: 40px; }
+#search { margin-bottom: 20px; padding: 8px; width: 300px; }
+</style>
+</head>
+<body>
+<h1>Knowledge Base</h1>
+<input type="text" id="search" placeholder="Search documents...">
+<ul id="fileList"></ul>
+<script>
+fetch('files.json')
+  .then(response => response.json())
+  .then(files => {
+    const list = document.getElementById('fileList');
+    files.forEach(f => {
+      const li = document.createElement('li');
+      const link = document.createElement('a');
+      link.href = f.path;
+      link.textContent = f.name;
+      li.appendChild(link);
+      list.appendChild(li);
+    });
+  });
+
+document.getElementById('search').addEventListener('input', function() {
+  const query = this.value.toLowerCase();
+  document.querySelectorAll('#fileList li').forEach(li => {
+    li.style.display = li.textContent.toLowerCase().includes(query) ? '' : 'none';
+  });
+});
+</script>
+</body>
+</html>
