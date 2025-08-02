@@ -44,28 +44,79 @@ $$\theta_{new} \leftarrow \theta_{old} - \alpha \nabla_{\theta} L(\theta)$$
 
 策略梯度的核心是**最大化**一個預期總獎勵函數 $J(\theta)$。
 
-#### Step 1: 定義優化目標 (Objective)
+這是策略梯度理論中最為核心且巧妙的一步，我們來詳細拆解它背後的數學邏輯。
 
-我們的目標是最大化**預期總獎勵** $J(\theta)$。這個預期值是所有可能的軌跡 $\tau$ 的總獎勵 $R(\tau)$ 的期望。
+這個轉換的關鍵在於兩個數學技巧：
+1.  **對數微分法 (Log-Derivative Trick)**
+2.  **將期望梯度與梯度期望互換**
 
-$$J(\theta) = \mathbb{E}_{\tau \sim \pi_{\theta}} [R(\tau)]$$
+---
 
-#### Step 2: 求優化目標對權重的梯度
+### Step 1: 策略梯度定理的起點
 
-為了最大化 $J(\theta)$，我們需要求其相對於策略網路權重 $\theta$ 的梯度 $\nabla_{\theta} J(\theta)$。根據**策略梯度定理**，這個梯度可以表示為：
+我們從優化目標 $J(\theta)$ 的定義出發，它是**預期總獎勵**：
 
-$$\nabla_{\theta} J(\theta) = \mathbb{E}_{\tau \sim \pi_{\theta}} \left[ \left( \sum_{t=0}^{T} \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) \right) \cdot R(\tau) \right]$$
+$$J(\theta) = \mathbb{E} \tau \sim \pi_{\theta} [R(\tau)] = \sum_{\tau} P(\tau; \theta) R(\tau)$$
 
-在實際應用中，我們不能計算期望值，而是通過**採樣 (sampling)** 來估計它。我們讓智能體執行一個回合，得到一個軌跡 $\tau$。這個軌跡的梯度估計值為：
+其中：
+* $P(\tau; \theta)$ 是在給定策略 $\pi_{\theta}$ 下，軌跡 $\tau$ 發生的機率。
+* $R(\tau)$ 是軌跡 $\tau$ 的總獎勵。
 
-$$\hat{g} = \left( \sum_{t=0}^{T} \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) \right) \cdot R(\tau)$$
+我們的目標是計算 $\nabla_{\theta} J(\theta)$。
 
-這裡， $\nabla_{\theta} \log \pi_{\theta}(a_t|s_t)$ 就是**對數策略的梯度**，它指明了如何調整權重來增加動作 $a_t$ 的機率。$R(\tau)$ 則是這個動作所帶來的**總獎勵**。
+$$\nabla_{\theta} J(\theta) = \nabla_{\theta} \sum_{\tau} P(\tau; \theta) R(\tau)$$
 
-#### Step 3: 梯度上升更新權重
+由於 $R(\tau)$ 與 $\theta$ 無關，我們可以將梯度移入求和符號：
 
-最後，我們使用**梯度上升法**來更新權重。新的權重 $\theta_{new}$ 將沿著梯度的正方向移動，以增加總獎勵。
+$$\nabla_{\theta} J(\theta) = \sum_{\tau} \nabla_{\theta} P(\tau; \theta) R(\tau)$$
 
-$$\theta_{new} \leftarrow \theta_{old} + \alpha \hat{g}$$
+---
 
-其中 $\alpha$ 是學習率。這個步驟會讓那些帶來高獎勵的動作，其在策略網路中的機率變得更高。
+### Step 2: 引入「對數微分法」
+
+這是最關鍵的一步。我們想計算 $P(\tau; \theta)$ 的梯度，但這很複雜。`log` 的引進將其轉化為更簡單的形式：
+
+我們知道一個函數的梯度可以寫成: $$\nabla_{\theta} f(\theta) = f(\theta) \cdot \nabla_{\theta} \log f(\theta)$$
+
+現在我們將這個技巧應用到 $P(\tau; \theta)$ 上：
+$$\nabla_{\theta} P(\tau; \theta) = P(\tau; \theta) \cdot \nabla_{\theta} \log P(\tau; \theta)$$
+
+將這個結果代回到我們的梯度公式中：
+
+$$\nabla_{\theta} J(\theta) = \sum_{\tau} P(\tau; \theta) \cdot \nabla_{\theta} \log P(\tau; \theta) \cdot R(\tau)$$
+
+這個式子就是策略梯度定理的雛形。它將一個**難以計算的梯度**（左邊）轉化成了**一個可以通過抽樣計算的期望形式**（右邊）。
+
+---
+
+### Step 3: 將軌跡機率展開
+
+現在我們需要知道 $\log P(\tau; \theta)$ 具體是什麼。一個軌跡 $\tau$ 發生的機率，是每個狀態轉移和動作選擇機率的乘積：
+
+$$P(\tau; \theta) = P(s_0) \prod_{t=0}^{T} \pi_{\theta}(a_t|s_t) P(s_{t+1}|s_t, a_t)$$
+
+這裡：
+* $P(s_0)$ 是初始狀態的機率。
+* $P(s_{t+1}|s_t, a_t)$ 是環境的狀態轉移機率，它**與 $\theta$ 無關**。
+* $\pi_{\theta}(a_t|s_t)$ 是策略網路的輸出，它**與 $\theta$ 有關**。
+
+接著我們對 $P(\tau; \theta)$ 取對數：
+$$\log P(\tau; \theta) = \log P(s_0) + \sum_{t=0}^{T} \log \pi_{\theta}(a_t|s_t) + \sum_{t=0}^{T} \log P(s_{t+1}|s_t, a_t)$$
+
+當我們對 $\log P(\tau; \theta)$ 求 $\theta$ 的梯度時，所有與 $\theta$ 無關的項（即與環境有關的項）都將變為零。所以：
+
+$$\nabla_{\theta} \log P(\tau; \theta) = \nabla_{\theta} \left[ \sum_{t=0}^{T} \log \pi_{\theta}(a_t|s_t) \right]$$
+
+---
+
+### Step 4: 最終整合與期望形式
+
+現在我們將這個簡化後的結果代回到 Step 2 的公式中：
+
+$$\nabla_{\theta} J(\theta) = \sum_{\tau} P(\tau; \theta) \left( \sum_{t=0}^{T} \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) \right) R(\tau)$$
+
+這個公式就是一個**期望 (Expectation)** 的形式！它等同於：
+
+$$\nabla_{\theta} J(\theta) = \mathbb{E}_{\tau \sim \pi_{\theta}} \left[ \left( \sum_{t=0}^{T} \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) \right) R(\tau) \right]$$
+
+這個等式就是策略梯度定理的最終形式。它之所以如此重要，是因為它將一個**難以計算的積分梯度**（左邊）轉換為一個可以透過**實際互動中的抽樣**來近似計算的**期望形式**（右邊）。我們只需要讓智能體玩遊戲，記錄軌跡，然後用這個公式來更新策略，而不需要知道環境模型。
