@@ -201,3 +201,83 @@ $$\nabla_\theta J(\theta) \approx \mathbb{E}_{\tau \sim \pi_\theta} \left[ \sum_
 ### **總結**
 
 Policy Gradient 是一類強大而靈活的強化學習算法.它通過直接對策略進行參數化和梯度優化,成功地解決了傳統基於價值方法在連續動作空間、隨機策略等問題上的不足.其核心的數學思想——Log-Derivative Trick,巧妙地將目標函數的梯度轉化為一個可以通過採樣來估計的期望形式.這不僅催生了 REINFORCE 等基礎算法,也為後續更先進的算法如 A2C/A3C, TRPO, PPO 等奠定了堅實的理論基礎,是現代強化學習不可或缺的基石.
+
+
+### 一些對於loss的誤解
+您這個問題問得非常好，這正是從監督式學習（Supervised Learning）思維轉換到強化學習策略梯度思維最關鍵、也最容易困惑的一步。
+
+您的困惑點在於：為什麼一個看起來不像「誤差」或「距離」的表達式，可以被當作 `loss`？
+
+答案是：**在 Policy Gradient 中，`loss` 的目的不是衡量「誤差」，而是作為一個「梯度產生器」。它的存在，是為了讓我們在使用 PyTorch 的自動微分工具時，能夠巧妙地產生我們理論上需要的那個梯度 `∇J(θ)`。**
+
+讓我們一步一步拆解這個思維轉換。
+
+### 1. 忘掉監督式學習中的 Loss
+
+在監督式學習中，Loss 有非常直觀的意義。例如：
+* **均方誤差 (MSE):** `Loss = (y_pred - y_true)²`。它直接衡量了「預測」和「真實標籤」之間的距離。Loss 越小，代表模型預測得越準。
+* **交叉熵 (Cross-Entropy):** 它衡量了兩個機率分佈的差異。Loss 越小，代表模型輸出的分佈越接近真實的分佈。
+
+在這些情況下，`Loss` 本身就是我們的**最終目標**（最小化誤差）。
+
+### 2. Policy Gradient 的獨特之處：沒有「正確答案」
+
+在 Policy Gradient 中，我們沒有 `y_true`（真實標籤）。在某個狀態 `s`，沒有一個絕對「正確」的動作 `a`。我們只有一個模糊的、延遲的信號：**回報 (Return) `G_t`**。
+* 如果 `G_t` 很高，說明從這一步開始的系列動作是「好的」。
+* 如果 `G_t` 很低，說明這個系列動作是「不好的」。
+
+我們的目標是：**調整策略網路 $\pi_{\theta}$，使得未來做出能導向高 `G_t` 的動作機率變大。**
+
+### 3. 如何讓 PyTorch 幫我們實現目標？
+
+我們已經從理論知道，要達成這個目標，我們需要計算梯度 $\nabla_{\theta} J(\theta)$，而它的近似值是：
+$$\nabla_{\theta} J(\theta) \approx \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) \cdot G_t$$
+（這裡我們先忽略加總和期望，只看單一樣本的貢獻）
+
+現在問題來了：我們如何命令 PyTorch 的 `optimizer` 執行 $\theta \leftarrow \theta + \alpha \cdot (\nabla_{\theta} \log \pi_{\theta} \cdot G_t)$ 的更新？
+
+PyTorch 只懂一件事：`optimizer.step()` 會根據 `loss.backward()` 算出的梯度 `∇loss` 來執行 $\theta \leftarrow \theta - \alpha \cdot \nabla_{\theta}\text{Loss}$。
+
+**這就是關鍵所在：我們需要設計一個 `Loss`，使得它的梯度 `∇Loss` 剛好等於我們不想要的 `-∇J(θ)`。**
+
+### 4. 「代理損失」(Surrogate Loss) 的誕生
+
+讓我們來做個簡單的數學推導。
+
+1.  **我們的目標梯度：** $g = \nabla_{\theta} \log \pi_{\theta}(a_t|s_t) \cdot G_t$
+2.  **我們想要的更新：** $\theta \leftarrow \theta + \alpha \cdot g$
+3.  **優化器實際的更新：** $\theta \leftarrow \theta - \alpha \cdot \nabla_{\theta} \text{Loss}$
+
+為了讓兩者等價，我們需要：
+$$\theta + \alpha \cdot g = \theta - \alpha \cdot \nabla_{\theta} \text{Loss}$$
+
+$$\alpha \cdot g = - \alpha \cdot \nabla_{\theta} \text{Loss}$$
+
+$$\nabla_{\theta} \text{Loss} = -g$$
+
+代入 $g$ 的定義，我們得到：
+$$\nabla_{\theta} \text{Loss} = - (\nabla_{\theta} \log \pi_{\theta}(a_t|s_t) \cdot G_t)$$
+
+現在，我們要找一個什麼樣的函數，它的梯度會是上面這個樣子？
+回想一下微積分：$\frac{d}{dx}[-c \cdot f(x)] = -c \cdot \frac{d}{dx}[f(x)]$ （其中 c 是常數）。
+
+在我們的問題中，$G_t$ 是根據獎勵計算出的一個**純數值**，對於參數 $\theta$ 來說，它就是一個**常數**。而 $\log \pi_{\theta}$ 是依賴於 $\theta$ 的函數。
+
+所以，如果我們定義：
+$$\text{Loss} = - \log \pi_{\theta}(a_t|s_t) \cdot G_t$$
+
+那麼當 PyTorch 對它求導時：
+$$\nabla_{\theta} \text{Loss} = \nabla_{\theta} [- \log \pi_{\theta}(a_t|s_t) \cdot G_t] = - (\nabla_{\theta} \log \pi_{\theta}(a_t|s_t)) \cdot G_t$$
+這就精確地得到了我們想要的梯度的相反數！
+
+### 結論與比喻
+
+您可以把 `loss = -log_prob * G_t` 理解為一個**巧妙的指令**，而不是一個**有物理意義的度量**。
+
+**一個比喻：**
+
+* **你的目標 (J(θ))**：把一座山（獎勵函數）上的巨石推到山頂。
+* **你的工具 (Optimizer)**：一個只會「沿著坡度向下滾」的機器人。
+* **你的策略 (`loss = -log_prob * G_t`)**：你不是直接命令機器人「向上推」，而是為它打造了一個**虛擬的、上下顛倒的鏡像山谷**。你把機器人放在這個山谷裡，對它說「往下滾」。當機器人在這個虛擬山谷裡滾向谷底時，它在真實世界裡的位置，恰好就是把巨石推向了山頂。
+
+所以，`loss = -log_prob * G_t` 就是在**定義那個虛擬山谷的形狀**。這個 `loss` 值的絕對大小沒有意義，但它**梯度的方向**（山谷的坡度）卻能完美地引導我們的優化器去完成最大化獎勵的任務。
